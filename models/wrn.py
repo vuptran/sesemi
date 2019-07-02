@@ -18,7 +18,7 @@ mom = 0.99
 eps = 0.001
 gamma = 'ones'
 # Convolution params
-bias = True
+bias = False
 weight_decay = 0.0005
 initer = initializers.he_normal(seed=seed_number)
 
@@ -151,8 +151,8 @@ def create_model(input_dim, N=4, k=2, dropout=0.0):
                            epsilon=eps, gamma_initializer=gamma)(x)
     x = LeakyReLU(leakiness)(x)
 
-    x = expand_conv(x, 32, k, strides=(1, 1))
     x = MaxPooling2D((2, 2), padding='same')(x)
+    x = expand_conv(x, 32, k, strides=(1, 1))
     nb_conv += 2
 
     for i in range(N - 1):
@@ -163,8 +163,8 @@ def create_model(input_dim, N=4, k=2, dropout=0.0):
                            epsilon=eps, gamma_initializer=gamma)(x)
     x = LeakyReLU(leakiness)(x)
 
-    x = expand_conv(x, 64, k, strides=(1, 1))
     x = MaxPooling2D((2, 2), padding='same')(x)
+    x = expand_conv(x, 64, k, strides=(1, 1))
     nb_conv += 2
 
     for i in range(N - 1):
