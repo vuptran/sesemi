@@ -1,11 +1,10 @@
 """
-Download source CIFAR-10 image classification dataset from:
+Download CIFAR-10 image classification dataset from:
 https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz
 """
 
 import numpy as np
-import os
-import pickle
+import os, pickle
 
 
 def load_data():
@@ -18,7 +17,7 @@ def load_data():
         """Internal utility for parsing CIFAR-10 data.
         
         # Returns
-        A tuple `(data, labels)`, with `data` normalized between [0, 1]
+        A tuple `(data, labels)`, with `data` normalized between [0, 1].
         """
         with open(fpath, 'rb') as f:
             d = pickle.load(f, encoding='latin1')
@@ -43,7 +42,7 @@ def load_data():
     x_test, y_test = load_batch(fpath)
     
     y_test = np.reshape(y_test, (len(y_test),))
-    
+
     x_train = x_train.transpose(0, 2, 3, 1)
     x_test = x_test.transpose(0, 2, 3, 1)
         

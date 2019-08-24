@@ -1,11 +1,10 @@
 """
-Download source CIFAR-100 image classification dataset from:
+Download CIFAR-100 image classification dataset from:
 https://www.cs.toronto.edu/~kriz/cifar-100-python.tar.gz
 """
 
 import numpy as np
-import os
-import pickle
+import os, pickle
 
         
 def load_data(label_mode='fine'):
@@ -21,7 +20,7 @@ def load_data(label_mode='fine'):
         """Internal utility for parsing CIFAR-100 data.
         
         # Returns
-        A tuple `(data, labels)`, with `data` normalized between [0, 1]
+        A tuple `(data, labels)`, with `data` normalized between [0, 1].
         """
         with open(fpath, 'rb') as f:
             d = pickle.load(f, encoding='latin1')

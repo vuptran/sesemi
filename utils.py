@@ -1,40 +1,30 @@
 """Utility functions for semi-supervised learning."""
 
 # Python package imports
-import os
 import numpy as np
-import scipy
+# Set seed number for reproducible data splits.
+rng = np.random.RandomState(1)
+import os, scipy
 from scipy import ndimage
 from sklearn.metrics import accuracy_score
 # Keras package imports
-from keras.models import Model
-from keras.layers import GlobalAveragePooling2D
-from keras.layers import Dropout, Dense, Input
 from keras import optimizers
-from keras.regularizers import l2
-from keras import backend as K
 from keras import initializers
+from keras import backend as K
+from keras.models import Model
+from keras.regularizers import l2
 from keras.callbacks import Callback
 from keras.utils import to_categorical
+from keras.layers import Dropout, Dense, Input
+from keras.layers import GlobalAveragePooling2D
 
-# Set seed number for reproducible randomness.
-seed_number = 1
-np.random.seed(seed_number)
-
-weight_decay = 0.0005
-initer = initializers.glorot_uniform(seed=seed_number)
-
-fc_params = dict(
-        activation='softmax',
-        kernel_initializer=initer,
-        kernel_regularizer=l2(weight_decay),
-        use_bias=True,
-    )
+proxy_labels = 6
 
 
-def geometric_transform(image, proxy_labels=6):
-    images, labels = [], []
+def geometric_transform(image):
     image = np.reshape(image, (32, 32, 3))
+    labels = np.empty((proxy_labels,), dtype='uint8')
+    images = np.empty((proxy_labels, 32, 32, 3), dtype='float32')
     for i in range(proxy_labels):
         if i <= 3:
             t = np.rot90(image, i)
@@ -42,9 +32,9 @@ def geometric_transform(image, proxy_labels=6):
             t = np.fliplr(image)
         else:
             t = np.flipud(image)
-        images.append(t)
-        labels.append(to_categorical(i, proxy_labels))
-    return images, labels
+        images[i] = t
+        labels[i] = i
+    return (images, to_categorical(labels))
         
         
 def global_contrast_normalize(images, scale=55, eps=1e-10):
@@ -73,23 +63,24 @@ def zca_whitener(images, identity_scale=0.1, eps=1e-10):
     U, S, _ = np.linalg.svd(
         image_covariance + identity_scale * np.eye(*image_covariance.shape)
     )
-    zca_decomp = np.dot(U, np.dot(np.diag(1. / np.sqrt(S + eps)), U.T))
+    zca_decomp = np.dot(U, np.dot(np.diag(1.0 / np.sqrt(S + eps)), U.T))
     image_mean = images.mean(axis=0)
     return lambda x: np.dot(x - image_mean, zca_decomp)
 
 
 def stratified_sample(label_array, labels_per_class):
+    label_array = label_array.reshape(-1)
     samples = []
     for cls in range(len(set(label_array))):
         inds = np.where(label_array == cls)[0]
-        np.random.shuffle(inds)
+        rng.shuffle(inds)
         inds = inds[:labels_per_class].tolist()
         samples.extend(inds)
     return samples
 
 
 def gaussian_noise(image, stddev=0.15):
-    return image + np.random.randn(*image.shape) * stddev
+    return image + stddev * np.random.standard_normal(image.shape)
 
 
 def transform_matrix_offset_center(matrix, x, y):
@@ -103,10 +94,8 @@ def transform_matrix_offset_center(matrix, x, y):
 
 def jitter(image, row_axis=0, col_axis=1, channel_axis=2,
            fill_mode='reflect', cval=0.0, order=1):
-    tx = np.random.choice([1, 2])
-    tx *= np.random.choice([-1, 1])
-    ty = np.random.choice([1, 2])
-    ty *= np.random.choice([-1, 1])
+    tx = np.random.choice([-2, -1, 1, 2])
+    ty = np.random.choice([-2, -1, 1, 2])
     
     transform_matrix = np.array([[1, 0, tx],
                                  [0, 1, ty],
@@ -132,7 +121,7 @@ def jitter(image, row_axis=0, col_axis=1, channel_axis=2,
 
 def datagen(super_iter, self_iter, batch_size):
     """Utility function to load data into required Keras model format."""
-    super_batch = 192
+    super_batch = batch_size * proxy_labels
     self_batch = batch_size
     while(True):
         x_super, y_super = zip(*[next(super_iter) for _ in range(super_batch)])
@@ -147,10 +136,10 @@ def datagen(super_iter, self_iter, batch_size):
 
 def datagen_tinyimages(super_iter, self_iter, extra_iter, batch_size):
     """Function to load extra tiny images into required Keras model format."""
-    super_batch = 192
-    self_batch = batch_size
-    extra_batch = 32 - batch_size # self_batch + extra_batch = 32
-    inds = np.arange(super_batch)
+    total_batch = 16
+    super_batch = total_batch * proxy_labels
+    self_batch  = batch_size
+    extra_batch = total_batch - self_batch
     while(True):
         x_super, y_super = zip(*[next(super_iter) for _ in range(super_batch)])
         x_self, y_self = zip(*[geometric_transform(next(self_iter))
@@ -161,17 +150,13 @@ def datagen_tinyimages(super_iter, self_iter, extra_iter, batch_size):
         y_super = np.vstack(y_super)
         x_self = np.vstack(x_self + x_extra)
         y_self = np.vstack(y_self + y_extra)
-        # Shuffle in batch.
-        np.random.shuffle(inds)
-        x_self = x_self[inds]
-        y_self = y_self[inds]
         yield ([x_self, x_super], [y_self, y_super])
 
 
 def load_tinyimages(indices):
     dirname = './datasets/tiny-images'
     fpath = os.path.join(dirname, 'tiny_images.bin')
-    images = np.zeros((len(indices), 3, 32, 32), dtype='float32')
+    images = np.empty((len(indices), 3, 32, 32), dtype='float32')
     with open(fpath, 'rb') as f:
         for i, idx in enumerate(indices):
             f.seek(3072 * idx)
@@ -181,21 +166,32 @@ def load_tinyimages(indices):
     return images
 
 
-def open_sesemi(model, input_shape, nb_classes, lrate, dropout):
-    cnn_trunk = model.create_model(input_shape)
+def compile_sesemi(network, input_shape, nb_classes,
+                   lrate, in_network_dropout, super_dropout):
+    weight_decay = 0.0005
+    initer = initializers.glorot_uniform()
+
+    fc_params = dict(
+            use_bias=True,
+            activation='softmax',
+            kernel_initializer=initer,
+            kernel_regularizer=l2(weight_decay),
+        )
+
+    cnn_trunk = network.create_network(input_shape, in_network_dropout)
     
     super_in = Input(shape=input_shape, name='super_data')
-    self_in = Input(shape=input_shape, name='self_data')
+    self_in  = Input(shape=input_shape, name='self_data')
     super_out = cnn_trunk(super_in)
-    self_out = cnn_trunk(self_in)
+    self_out  = cnn_trunk(self_in)
     
     super_out = GlobalAveragePooling2D(name='super_gap')(super_out)
-    if dropout > 0.0:
-        super_out = Dropout(dropout, name='dropout')(super_out)
-    self_out = GlobalAveragePooling2D(name='self_gap')(self_out)
+    self_out  = GlobalAveragePooling2D(name='self_gap')(self_out)
+    if super_dropout > 0.0:
+        super_out = Dropout(super_dropout, name='super_dropout')(super_out)
     
     super_out = Dense(nb_classes, name='super_clf', **fc_params)(super_out)
-    self_out = Dense(6, name='self_clf', **fc_params)(self_out)
+    self_out  = Dense(proxy_labels, name='self_clf', **fc_params)(self_out)
 
     sesemi_model = Model(inputs=[self_in, super_in],
                          outputs=[self_out, super_out])
@@ -227,15 +223,22 @@ class LRScheduler(Callback):
 
 
 class DenseEvaluator(Callback):
-    def __init__(self, inference_model, validation_data, hflip):
-        x_val = validation_data[0]
-        y_val = validation_data[1]
+    def __init__(self, inference_model, val_data, hflip,
+                 test_every=1, oversample=True):
+        x_val = val_data[0]
+        y_val = val_data[1]
 
-        self.data = []
-        self.labels = y_val
-        self.inference_model = inference_model
         self.hflip = hflip
+        self.labels = y_val
+        self.test_every = test_every
+        self.oversample = oversample
+        self.inference_model = inference_model
+
+        if not self.oversample:
+            self.data = x_val
+            return
         
+        self.data = []
         for x in x_val:
             t = jitter(x)
             noisy_x = gaussian_noise(x)
@@ -252,16 +255,24 @@ class DenseEvaluator(Callback):
         self.data = np.vstack(self.data)
         
     def on_epoch_end(self, epoch, logs={}):
-        y_pred = self.inference_model.predict(self.data, batch_size=64)
-        if self.hflip:
-            y_pred = y_pred.reshape((len(y_pred) // 8, 8, -1))
+        if (epoch + 1) % self.test_every != 0:
+            return
+        
+        print('Evaluating with oversample=%s...' % self.oversample)
+        y_pred = self.inference_model.predict(self.data, batch_size=128)
+        
+        if not self.oversample:
+            y_pred = np.argmax(y_pred, axis=1)
         else:
-            y_pred = y_pred.reshape((len(y_pred) // 4, 4, -1))
-        y_pred = y_pred.mean(axis=1)
-        y_pred = np.argmax(y_pred, axis=1)
+            if self.hflip:
+                y_pred = y_pred.reshape((len(y_pred) // 8, 8, -1))
+            else:
+                y_pred = y_pred.reshape((len(y_pred) // 4, 4, -1))
+            y_pred = y_pred.mean(axis=1)
+            y_pred = np.argmax(y_pred, axis=1)
         
         y_true = self.labels
         
         error = 1.0 - accuracy_score(y_true, y_pred)
-        print('sesemi_error: {:.4f}'.format(error), '\n')
+        print('classification error rate: {:.4f}'.format(error), '\n')
 
