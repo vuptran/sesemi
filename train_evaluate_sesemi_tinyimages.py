@@ -1,5 +1,5 @@
 """
-Train and evaluate SESEMI architecture for semi-supevised learning
+Train and evaluate SESEMI architecture for semi-supervised learning
 with self-supervised task of recognizing geometric transformations
 defined as 90-degree rotations with horizontal and vertical flips.
 """
