@@ -1,5 +1,7 @@
 # Learning with Self-Supervised Regularization
 
+### Update: this repo exists only for the reproduction of the experiments presented in the paper below. The user is encouraged to check the PyTorch version of this repo for practical semi-supervised image classification on large realistic datasets using modern CNN backbones, along with the latest developments and features. https://github.com/FlyreelAI/sesemi
+
 This repository contains a Keras implementation of the SESEMI architecture for supervised and semi-supervised image classification, as described in the NeurIPS'19 LIRE Workshop paper:
 
 Tran, Phi Vu (2019) [Exploring Self-Supervised Regularization for Supervised and Semi-Supervised Learning](https://arxiv.org/abs/1906.10343).
